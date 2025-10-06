@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 import logging
 import httpx
 from .core.logging_config import configure_logging
@@ -20,6 +21,17 @@ async def validate_settings():
 
 app.include_router(incidents_router, prefix="/api/v1")
 app.include_router(metrics_router, prefix="/api/v1")
+
+# Enable permissive CORS so the API is accessible from any origin.
+# If you want to restrict access, replace `allow_origins=["*"]` with a list
+# of allowed origins (e.g. ["https://example.com"]).
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.get("/health")
 async def health():
