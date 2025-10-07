@@ -42,6 +42,10 @@ Note: If you change `SERVICENOW_API_BASE_PATH` or `SERVICENOW_API_VERSION`, you 
 - `GET /api/v1/incidents/{number}`
 - `POST /api/v1/incidents` (create)
 - `PATCH /api/v1/incidents/{sys_id}` (update)
+ - `PUT /api/v1/incidents/{sys_id}/assignee` (set/replace assignee; body: {"assigned_to": "<user name or partial>"})
+	 - Provide a partial or full user display name (or user_name); backend searches and resolves.
+	 - Selection priority: exact name match > exact user_name match > single candidate > otherwise 409 with top 5 suggestions.
+	 - 404 if nothing matches.
 - `GET /api/v1/metrics/counts`
 - `GET /api/v1/search/users?q=term&limit=20&fields=field1,field2` (user search; omit `fields` or set to `*` for all available table fields)
 - `GET /api/v1/search/locations?q=term&limit=20&fields=field1,field2` (location search; omit `fields` or set to `*` for all)

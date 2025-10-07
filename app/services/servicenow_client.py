@@ -96,10 +96,18 @@ class ServiceNowClient:
 
     async def update_incident(self, sys_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         try:
-            resp = await self._client.patch(f'/table/incident/{sys_id}', json=payload)
+            # Include display values so reference fields (assignment_group, assigned_to, etc.) come back as objects
+            # then normalize them to plain strings expected by Pydantic schema.
+            params = {
+                'sysparm_display_value': 'true'
+            }
+            resp = await self._client.patch(f'/table/incident/{sys_id}', params=params, json=payload)
             self._handle_redirect(resp, f"update incident {sys_id}")
             resp.raise_for_status()
-            return resp.json().get('result', {})
+            raw = resp.json().get('result', {})
+            if raw:
+                return self._normalize_record(raw)
+            return raw
         except httpx.RequestError as e:
             logger.error(f"ServiceNow connection error update incident {sys_id}: {e}")
             raise_gateway_error("Unable to connect to ServiceNow (update incident)")
@@ -189,49 +197,6 @@ class ServiceNowClient:
             raise_gateway_error("Unable to connect to ServiceNow (search locations)")
         except httpx.HTTPStatusError as e:
             logger.error(f"ServiceNow HTTP error search locations: {e.response.status_code} {e.response.text}")
-            raise_gateway_error(f"ServiceNow responded with status {e.response.status_code}")
-
-    # ----------------- affected users derivation -----------------
-    async def get_incident_affected_users(
-        self,
-        number: str,
-        incident_fields: Optional[List[str]] = None,
-        user_fields: Optional[List[str]] = None,
-    ) -> List[Dict[str, Any]]:
-        """Derive affected users from standard incident user reference fields and list fields.
-
-        Pattern 1 approach: collects sys_ids from caller_id, opened_by, requested_by, assigned_to, closed_by,
-        watch_list, additional_assignee_list and optional custom fields (u_affected_user, u_affected_users).
-
-        If user_fields is provided (and not ['*']), restrict sys_user fetch to those fields.
-        Returns normalized user records (display values where references appear).
-        """
-        # Fields needed from incident to gather user references
-        base_incident_fields = [
-            'sys_id','caller_id','opened_by','requested_by','assigned_to','closed_by',
-            'watch_list','additional_assignee_list','u_affected_user','u_affected_users'
-        ]
-        if incident_fields:
-            # ensure base fields included
-            fetch_fields = list({*base_incident_fields, *incident_fields})
-        else:
-            fetch_fields = base_incident_fields
-
-        params = {
-            'sysparm_query': f'number={number}',
-            'sysparm_limit': '1',
-            'sysparm_fields': ','.join(fetch_fields),
-            'sysparm_display_value': 'false'  # need raw sys_ids
-        }
-        try:
-            resp = await self._client.get('/table/incident', params=params)
-            self._handle_redirect(resp, f'get incident affected users {number}')
-            resp.raise_for_status()
-        except httpx.RequestError as e:
-            logger.error(f"ServiceNow connection error get incident affected users {number}: {e}")
-            raise_gateway_error("Unable to connect to ServiceNow (affected users - incident fetch)")
-        except httpx.HTTPStatusError as e:
-            logger.error(f"ServiceNow HTTP error get incident affected users {number}: {e.response.status_code} {e.response.text}")
             raise_gateway_error(f"ServiceNow responded with status {e.response.status_code}")
 
     # ----------------- assignee suggestions -----------------
@@ -358,36 +323,6 @@ class ServiceNowClient:
                     # heuristic: sys_ids are 32 char hex normally
                     if len(val) >= 32:
                         user_ids.add(val)
-
-        scan_fields = [
-            'caller_id','opened_by','requested_by','assigned_to','closed_by',
-            'watch_list','additional_assignee_list','u_affected_user','u_affected_users'
-        ]
-        for f in scan_fields:
-            add_value(incident.get(f))
-
-        if not user_ids:
-            return []
-
-        user_params: Dict[str, Any] = {
-            'sysparm_query': 'sys_idIN' + ','.join(sorted(user_ids)),
-            'sysparm_display_value': 'true'
-        }
-        if user_fields and not (len(user_fields) == 1 and user_fields[0] == '*'):
-            user_params['sysparm_fields'] = ','.join(user_fields)
-
-        try:
-            u_resp = await self._client.get('/table/sys_user', params=user_params)
-            self._handle_redirect(u_resp, f'get affected users list {number}')
-            u_resp.raise_for_status()
-            data = u_resp.json().get('result', [])
-            return [self._normalize_record(u) for u in data]
-        except httpx.RequestError as e:
-            logger.error(f"ServiceNow connection error affected users list {number}: {e}")
-            raise_gateway_error("Unable to connect to ServiceNow (affected users - user fetch)")
-        except httpx.HTTPStatusError as e:
-            logger.error(f"ServiceNow HTTP error affected users list {number}: {e.response.status_code} {e.response.text}")
-            raise_gateway_error(f"ServiceNow responded with status {e.response.status_code}")
 
     # ----------------- internal helpers -----------------
     def _normalize_record(self, record: Dict[str, Any]) -> Dict[str, Any]:

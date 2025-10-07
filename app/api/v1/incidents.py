@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from ...services.servicenow_client import get_client, ServiceNowClient
-from ...schemas.incident import IncidentList, Incident, IncidentCreate, IncidentUpdate
+from ...schemas.incident import IncidentList, Incident, IncidentCreate, IncidentUpdate, AssigneeUpdate
 from ...schemas.search import User
 from ...schemas.common import Message
 from typing import Optional
@@ -28,6 +28,54 @@ async def create_incident(payload: IncidentCreate, client: ServiceNowClient = De
 @router.patch("/{sys_id}", response_model=Incident)
 async def update_incident(sys_id: str, payload: IncidentUpdate, client: ServiceNowClient = Depends(get_client)):
     res = await client.update_incident(sys_id, payload.model_dump(exclude_none=True))
+    return res
+
+@router.put("/{sys_id}/assignee", response_model=Incident)
+async def set_incident_assignee(sys_id: str, body: AssigneeUpdate, client: ServiceNowClient = Depends(get_client)):
+    term = body.assigned_to.strip()
+    # Detect if path param is an incident number (e.g., starts with INC and not 32 hex chars) and resolve to sys_id
+    if not (len(sys_id) == 32 and all(c in '0123456789abcdef' for c in sys_id.lower())):
+        # treat as number
+        incident = await client.get_incident(sys_id, fields=['sys_id'])  # here sys_id is actually number
+        if not incident or not incident.get('sys_id'):
+            raise HTTPException(status_code=404, detail="Incident number not found")
+        real_sys_id = incident['sys_id']
+    else:
+        real_sys_id = sys_id
+    # Always treat input as a (partial) human name or user_name. We perform a limited search and then choose.
+    try:
+        candidates = await client.search_users(term=term, limit=25, fields=['sys_id','name','user_name','email'])
+    except Exception:
+        raise HTTPException(status_code=400, detail="Unable to search for assignee name")
+
+    if not candidates:
+        raise HTTPException(status_code=404, detail="No user found matching term")
+
+    # Prioritize exact match on name, then exact on user_name, else if single result just use it, else ambiguous.
+    lower_term = term.lower()
+    exact_name = [u for u in candidates if (u.get('name') or '').lower() == lower_term]
+    exact_uname = [u for u in candidates if (u.get('user_name') or '').lower() == lower_term]
+    chosen = None
+    if len(exact_name) == 1:
+        chosen = exact_name[0]
+    elif len(exact_uname) == 1 and not exact_name:
+        chosen = exact_uname[0]
+    elif len(candidates) == 1:
+        chosen = candidates[0]
+    else:
+        # Ambiguous: return 409 with minimal suggestions
+        suggestions = [
+            {k: v for k, v in u.items() if k in {'sys_id','name','user_name','email'}} for u in candidates[:5]
+        ]
+        raise HTTPException(status_code=409, detail={"message": "Ambiguous name; refine search", "suggestions": suggestions})
+
+    sys_id_target = chosen.get('sys_id')
+    if not sys_id_target:
+        raise HTTPException(status_code=500, detail="Resolved user missing sys_id")
+
+    res = await client.update_incident(real_sys_id, {"assigned_to": sys_id_target})
+    if not res:
+        raise HTTPException(status_code=404, detail="Incident not found or update failed")
     return res
 
 @router.get("/{number}/affected-users", response_model=list[User])

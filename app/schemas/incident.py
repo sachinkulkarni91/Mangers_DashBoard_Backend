@@ -17,6 +17,9 @@ class IncidentCreate(IncidentBase):
 class IncidentUpdate(IncidentBase):
     pass
 
+class AssigneeUpdate(BaseModel):
+    assigned_to: str = Field(..., description="sys_id of the user to assign the incident to")
+
 class Incident(IncidentBase):
     number: str
     sys_id: Optional[str] = None
