@@ -8,6 +8,9 @@ class User(BaseModel):
     user_name: Optional[str] = None
     email: Optional[str] = None
 
+    class Config:
+        extra = 'allow'  # allow arbitrary additional fields when requesting all
+
 
 class Location(BaseModel):
     sys_id: str
@@ -15,6 +18,9 @@ class Location(BaseModel):
     city: Optional[str] = None
     state: Optional[str] = None
     country: Optional[str] = None
+
+    class Config:
+        extra = 'allow'
 
 
 class UserSearchResults(BaseModel):

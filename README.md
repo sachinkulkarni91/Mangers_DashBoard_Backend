@@ -43,6 +43,23 @@ Note: If you change `SERVICENOW_API_BASE_PATH` or `SERVICENOW_API_VERSION`, you 
 - `POST /api/v1/incidents` (create)
 - `PATCH /api/v1/incidents/{sys_id}` (update)
 - `GET /api/v1/metrics/counts`
+- `GET /api/v1/search/users?q=term&limit=20&fields=field1,field2` (user search; omit `fields` or set to `*` for all available table fields)
+- `GET /api/v1/search/locations?q=term&limit=20&fields=field1,field2` (location search; omit `fields` or set to `*` for all)
+ - `GET /api/v1/incidents/{number}/affected-users?user_fields=field1,field2` (derive affected users from incident user-related fields; omit `user_fields` or use `*` for all)
+
+### Search Endpoint Field Control
+For the search endpoints, previously a fixed subset of fields was returned. Now:
+* If you do not pass `fields`, the backend will NOT restrict `sysparm_fields`, so ServiceNow returns all default readable fields for that table.
+* If you pass `fields=field1,field2`, only those fields are requested from ServiceNow.
+* If you pass `fields=*`, it's treated the same as omitting the parameter (all fields).
+
+The response Pydantic models allow additional unexpected fields (`extra=allow`) so expanded data will be serialized without errors.
+
+### Affected Users Derivation
+The endpoint `/api/v1/incidents/{number}/affected-users` gathers unique user sys_ids from these incident fields (if present):
+`caller_id, opened_by, requested_by, assigned_to, closed_by, watch_list, additional_assignee_list, u_affected_user, u_affected_users`.
+
+It then queries `sys_user` for those ids. Provide `user_fields` to limit returned user attributes; omit or set `*` for all available fields. Optional fields not requested may appear as null due to schema shape.
 
 ## Adjusting Queries
 The dashboard counts use placeholder query filters in `ServiceNowClient.get_dashboard_counts`. Update to reflect correct fields for SLA breach, at risk, etc. Use ServiceNow encoded queries (caret `^` separators). For counts we rely on header `X-Total-Count`; ensure your instance returns it (sometimes need `sysparm_count=true` or use aggregate API instead).

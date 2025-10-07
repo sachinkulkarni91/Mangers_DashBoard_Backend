@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from ...services.servicenow_client import get_client, ServiceNowClient
 from ...schemas.incident import IncidentList, Incident, IncidentCreate, IncidentUpdate
+from ...schemas.search import User
 from ...schemas.common import Message
 from typing import Optional
 
@@ -28,3 +29,18 @@ async def create_incident(payload: IncidentCreate, client: ServiceNowClient = De
 async def update_incident(sys_id: str, payload: IncidentUpdate, client: ServiceNowClient = Depends(get_client)):
     res = await client.update_incident(sys_id, payload.model_dump(exclude_none=True))
     return res
+
+@router.get("/{number}/affected-users", response_model=list[User])
+async def get_affected_users(
+    number: str,
+    user_fields: Optional[str] = Query(
+        None,
+        description="Comma-separated sys_user fields to return. Use * or omit for all.") ,
+    client: ServiceNowClient = Depends(get_client)
+):
+    field_list: Optional[list[str]] = None
+    if user_fields:
+        parsed = [f.strip() for f in user_fields.split(',') if f.strip()]
+        field_list = parsed if parsed else None
+    users = await client.get_incident_affected_users(number=number, user_fields=field_list)
+    return users
