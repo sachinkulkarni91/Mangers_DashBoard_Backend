@@ -7,6 +7,11 @@ def test_settings_defaults(monkeypatch):
     monkeypatch.setenv('SERVICENOW_INSTANCE','example.service-now.com')
     monkeypatch.setenv('SERVICENOW_USERNAME','user')
     monkeypatch.setenv('SERVICENOW_PASSWORD','pass')
+    # Clear cached settings so new env vars apply
+    try:
+        get_settings.cache_clear()  # type: ignore[attr-defined]
+    except AttributeError:
+        pass
     settings = get_settings()
     assert settings.servicENow_instance == 'example.service-now.com'
 

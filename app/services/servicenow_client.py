@@ -138,6 +138,56 @@ class ServiceNowClient:
                 results[key] = 0
         return results
 
+    # ----------------- search endpoints -----------------
+    async def search_users(self, term: str, limit: int = 20) -> List[Dict[str, Any]]:
+        """Search sys_user table by name or user id.
+        We search on name fields and user_name. Adjust encoded query as needed.
+        """
+        # ServiceNow encoded query: nameLIKEterm^ORuser_nameLIKEterm
+        query = f"nameLIKE{term}^ORuser_nameLIKE{term}"
+        params = {
+            'sysparm_query': query,
+            'sysparm_limit': str(limit),
+            'sysparm_display_value': 'true',
+            'sysparm_fields': 'sys_id,name,user_name,email'
+        }
+        try:
+            resp = await self._client.get('/table/sys_user', params=params)
+            self._handle_redirect(resp, 'search users')
+            resp.raise_for_status()
+            data = resp.json().get('result', [])
+            return [self._normalize_record(r) for r in data]
+        except httpx.RequestError as e:
+            logger.error(f"ServiceNow connection error search users: {e}")
+            raise_gateway_error("Unable to connect to ServiceNow (search users)")
+        except httpx.HTTPStatusError as e:
+            logger.error(f"ServiceNow HTTP error search users: {e.response.status_code} {e.response.text}")
+            raise_gateway_error(f"ServiceNow responded with status {e.response.status_code}")
+
+    async def search_locations(self, term: str, limit: int = 20) -> List[Dict[str, Any]]:
+        """Search cmn_location table by name.
+        Adjust fields/filters based on your instance's configuration.
+        """
+        query = f"nameLIKE{term}"
+        params = {
+            'sysparm_query': query,
+            'sysparm_limit': str(limit),
+            'sysparm_display_value': 'true',
+            'sysparm_fields': 'sys_id,name,city,state,country'
+        }
+        try:
+            resp = await self._client.get('/table/cmn_location', params=params)
+            self._handle_redirect(resp, 'search locations')
+            resp.raise_for_status()
+            data = resp.json().get('result', [])
+            return [self._normalize_record(r) for r in data]
+        except httpx.RequestError as e:
+            logger.error(f"ServiceNow connection error search locations: {e}")
+            raise_gateway_error("Unable to connect to ServiceNow (search locations)")
+        except httpx.HTTPStatusError as e:
+            logger.error(f"ServiceNow HTTP error search locations: {e.response.status_code} {e.response.text}")
+            raise_gateway_error(f"ServiceNow responded with status {e.response.status_code}")
+
     # ----------------- internal helpers -----------------
     def _normalize_record(self, record: Dict[str, Any]) -> Dict[str, Any]:
         """Flatten reference field objects (with display_value/link) to just the display_value string.

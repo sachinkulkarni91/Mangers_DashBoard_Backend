@@ -5,6 +5,7 @@ import httpx
 from .core.logging_config import configure_logging
 from .api.v1.incidents import router as incidents_router
 from .api.v1.metrics import router as metrics_router
+from .api.v1.search import router as search_router
 from .core.config import get_settings
 
 configure_logging()
@@ -21,6 +22,7 @@ async def validate_settings():
 
 app.include_router(incidents_router, prefix="/api/v1")
 app.include_router(metrics_router, prefix="/api/v1")
+app.include_router(search_router, prefix="/api/v1")
 
 # Enable permissive CORS so the API is accessible from any origin.
 # If you want to restrict access, replace `allow_origins=["*"]` with a list
