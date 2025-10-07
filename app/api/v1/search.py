@@ -24,3 +24,18 @@ async def search_locations(q: str = Query(..., min_length=1, description="Search
         field_list = parsed if parsed else None
     records = await client.search_locations(term=q, limit=limit, fields=field_list)
     return {"result": records}
+
+@router.get("/assignees", response_model=UserSearchResults)
+async def search_assignees(
+    q: Optional[str] = Query(None, min_length=1, description="Search term (name/user_name)"),
+    assignment_group: Optional[str] = Query(None, description="Restrict to members of this group sys_id"),
+    limit: int = Query(20, le=100),
+    fields: Optional[str] = Query(None, description="Comma separated list of user fields to return. Use * for all."),
+    client: ServiceNowClient = Depends(get_client)
+):
+    field_list: Optional[List[str]] = None
+    if fields is not None:
+        parsed = [f.strip() for f in fields.split(',') if f.strip()]
+        field_list = parsed if parsed else None
+    users = await client.search_assignable_users(term=q, assignment_group=assignment_group, limit=limit, fields=field_list)
+    return {"result": users}

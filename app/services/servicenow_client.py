@@ -234,6 +234,106 @@ class ServiceNowClient:
             logger.error(f"ServiceNow HTTP error get incident affected users {number}: {e.response.status_code} {e.response.text}")
             raise_gateway_error(f"ServiceNow responded with status {e.response.status_code}")
 
+    # ----------------- assignee suggestions -----------------
+    async def search_assignable_users(
+        self,
+        term: Optional[str] = None,
+        assignment_group: Optional[str] = None,
+        limit: int = 20,
+        fields: Optional[List[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Search users that can be assigned incidents.
+
+        If assignment_group (sys_id) supplied, restrict to members of that group using sys_user_grmember.
+        Strategy:
+          1. If group provided, fetch member user sys_ids (limit a reasonable number: 500) from membership table.
+          2. Build user query filtering to those ids AND optional name/user_name term.
+          3. If no group, fallback to simple name/user_name LIKE search (reuse search_users style).
+
+        NOTE: For performance, if group has many members and term provided, we still fetch all member ids then filter.
+        A more advanced optimization would push term into membership join via scripted API, omitted here for simplicity.
+        """
+        member_ids: Optional[set[str]] = None
+        if assignment_group:
+            mem_params = {
+                'sysparm_query': f'group={assignment_group}',
+                'sysparm_fields': 'user',
+                'sysparm_limit': '500',
+                'sysparm_display_value': 'false'
+            }
+            try:
+                mem_resp = await self._client.get('/table/sys_user_grmember', params=mem_params)
+                self._handle_redirect(mem_resp, 'fetch group members')
+                mem_resp.raise_for_status()
+                rows = mem_resp.json().get('result', [])
+                ids: set[str] = set()
+                for r in rows:
+                    u = r.get('user')
+                    if isinstance(u, dict):
+                        val = u.get('value')
+                        if val:
+                            ids.add(val)
+                member_ids = ids
+                if not member_ids:
+                    return []
+            except httpx.RequestError as e:
+                logger.error(f"ServiceNow connection error group members: {e}")
+                raise_gateway_error('Unable to connect to ServiceNow (group members)')
+            except httpx.HTTPStatusError as e:
+                logger.error(f"ServiceNow HTTP error group members: {e.response.status_code} {e.response.text}")
+                raise_gateway_error(f'ServiceNow responded with status {e.response.status_code}')
+
+        # Build user query
+        query_parts: List[str] = []
+        if member_ids:
+            # chunk if too many (SN limit for IN list ~ 1024 chars; simplistic split at 100)
+            ids_list = sorted(member_ids)
+            if len(ids_list) > 100:
+                # naive chunk OR chain
+                chunks = [ids_list[i:i+100] for i in range(0, len(ids_list), 100)]
+                or_queries = [ 'sys_idIN' + ','.join(chunk) for chunk in chunks ]
+                # join with ^NQ so both halves accepted
+                first = True
+                combined = ''
+                for oq in or_queries:
+                    if first:
+                        combined = oq
+                        first = False
+                    else:
+                        combined += '^NQ' + oq
+                query_parts.append(combined)
+            else:
+                query_parts.append('sys_idIN' + ','.join(ids_list))
+        if term:
+            safe = term.replace('^','')
+            query_parts.append(f'nameLIKE{safe}^ORuser_nameLIKE{safe}')
+
+        user_query = '^'.join(q for q in query_parts if q)
+        if not user_query and not term:
+            # default broad search limited to 20
+            user_query = 'active=true'
+
+        params: Dict[str, Any] = {
+            'sysparm_query': user_query,
+            'sysparm_limit': str(limit),
+            'sysparm_display_value': 'true'
+        }
+        if fields and not (len(fields) == 1 and fields[0] == '*'):
+            params['sysparm_fields'] = ','.join(fields)
+
+        try:
+            resp = await self._client.get('/table/sys_user', params=params)
+            self._handle_redirect(resp, 'search assignable users')
+            resp.raise_for_status()
+            data = resp.json().get('result', [])
+            return [self._normalize_record(u) for u in data]
+        except httpx.RequestError as e:
+            logger.error(f"ServiceNow connection error assignable users: {e}")
+            raise_gateway_error('Unable to connect to ServiceNow (assignable users)')
+        except httpx.HTTPStatusError as e:
+            logger.error(f"ServiceNow HTTP error assignable users: {e.response.status_code} {e.response.text}")
+            raise_gateway_error(f'ServiceNow responded with status {e.response.status_code}')
+
         inc_list = resp.json().get('result', [])
         if not inc_list:
             return []
