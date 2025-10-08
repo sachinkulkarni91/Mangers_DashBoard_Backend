@@ -335,9 +335,18 @@ class ServiceNowClient:
             if isinstance(v, dict):
                 # If it looks like a reference object
                 disp = v.get('display_value') or v.get('displayValue')
-                if disp is not None:
-                    flattened[k] = disp
+                # Some malformed responses may embed another dict in 'value' or corrupt the link; be defensive.
+                if disp is not None and not isinstance(disp, dict):
+                    flattened[k] = str(disp)
                     continue
+                val = v.get('value')
+                if val is not None and not isinstance(val, dict):
+                    # Fallback to raw value when display value missing
+                    flattened[k] = str(val)
+                    continue
+                # Last resort: stringify the dict (ensures Pydantic gets a string)
+                flattened[k] = str(v)
+                continue
             flattened[k] = v
         return flattened
 
